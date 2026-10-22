@@ -25,8 +25,8 @@ Every script pair in this repository follows strict Intune Management Extension 
 | Package | Detection Script | Remediation Script | Run Context | Target Issue |
 | :--- | :--- | :--- | :--- | :--- |
 | **BitLocker-Escrow** | `Detect-BitLockerEscrow.ps1` | `Remediate-BitLockerEscrow.ps1` | `SYSTEM` (64-bit) | Detects encrypted OS volumes with suspended protection or missing a `RecoveryPassword` key protector escrowed to Entra ID. |
-| **LocalAdmin-Hygiene** | `Detect-UnauthorizedLocalAdmins.ps1` | `Remediate-UnauthorizedLocalAdmins.ps1` | `SYSTEM` (64-bit) | Audits local `Administrators` (`S-1-5-32-544`) membership against an approved baseline (LAPS, Domain Admins) and removes unauthorized accounts. |
-| **SystemHealth-VSS-Patching** | `Detect-SystemBackupAndPatchHealth.ps1` | `Remediate-SystemBackupAndPatchHealth.ps1` | `SYSTEM` (64-bit) | Pre-backup and patch window checklist: detects failed Volume Shadow Copy (VSS) writers, disabled Windows Update (`wuauserv`/`BITS`/`CryptSvc`) services, and system drive disk pressure. |
+| **LocalAdmin-Hygiene** *(WIP — v1.0.0)* | `Detect-UnauthorizedLocalAdmins.ps1` | `Remediate-UnauthorizedLocalAdmins.ps1` | `SYSTEM` (64-bit) | Audits local `Administrators` (`S-1-5-32-544`) membership against an approved baseline (LAPS, Domain Admins) and removes unauthorized accounts. |
+| **SystemHealth-VSS-Patching** *(WIP — v1.0.0)* | `Detect-SystemBackupAndPatchHealth.ps1` | `Remediate-SystemBackupAndPatchHealth.ps1` | `SYSTEM` (64-bit) | Pre-backup and patch window checklist: detects failed Volume Shadow Copy (VSS) writers, disabled Windows Update (`wuauserv`/`BITS`/`CryptSvc`) services, and system drive disk pressure. |
 
 ---
 
