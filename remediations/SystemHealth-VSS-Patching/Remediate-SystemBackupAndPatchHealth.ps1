@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    MSP / Intune System Health & Backup Readiness Remediation: Resets failed VSS Writers and Windows Update components.
+    Intune System Health & Backup Readiness Remediation: Re-enables and restarts core VSS and Windows Update services.
 
 .DESCRIPTION
-    Executes in 64-bit SYSTEM context via RMM / Intune Proactive Remediations:
+    Executes in 64-bit SYSTEM context via Intune Proactive Remediations or an RMM script policy:
     1. Re-enables core backup and patching services (VSS, CryptSvc, BITS, wuauserv) if disabled.
     2. Restarts Volume Shadow Copy (VSS) and Cryptographic Services to clear transient VSS writer locks before backup windows.
     3. Purges stale Windows Temp files older than 14 days when disk pressure is detected.
@@ -46,7 +46,12 @@ try {
             Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Output "REMEDIATED: Core VSS backup writers and Windows Update services reset; stale system temp files purged."
+    if ($WhatIfMode) {
+        Write-Output "WHATIF: Would re-enable and restart VSS, BITS, wuauserv and CryptSvc, and purge system temp files older than 14 days."
+        exit 0
+    }
+
+    Write-Output "REMEDIATED: VSS, BITS, wuauserv and CryptSvc re-enabled and restarted; system temp files older than 14 days purged. Application VSS writers (for example SQL) may still need their own service restarted."
     exit 0
 }
 catch {

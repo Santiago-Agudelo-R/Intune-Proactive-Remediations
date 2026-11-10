@@ -7,7 +7,7 @@
     1. Hardware & BIOS Inventory (Snipe-IT / CMDB Schema): Extracts SerialNumber, Manufacturer, Model,
        TotalPhysicalMemoryGB, OS Build, UptimeDays, and CIS/NIST baseline posture.
     2. Service & WMI Self-Healing: Detects services stuck in 'StopPending' or 'StartPending', verifies
-       WinRM (WSMan) and WMI (Winmgmt) operational state, and flags excessive uptime (>14 days).
+       that the WinRM and WMI (Winmgmt) services are running, and flags excessive uptime (>14 days).
     Supports -DemoMode for offline testing and Pester CI pipelines.
 #>
 
@@ -44,8 +44,8 @@ function Get-EndpointSupportDiagnostic {
         $supportFindings.Add("RebootRequired_ExcessiveUptime($($AssetTelemetry.UptimeDays)d > ${UptimeThresholdDays}d)")
     }
 
-    if (-not $AssetTelemetry.WmiRepositoryConsistent) {
-        $supportFindings.Add("WmiRepositoryInconsistent")
+    if (-not $AssetTelemetry.WmiServiceRunning) {
+        $supportFindings.Add("WmiServiceStopped")
     }
 
     if (-not $AssetTelemetry.WinRmServiceRunning) {
@@ -64,7 +64,7 @@ function Get-EndpointSupportDiagnostic {
         hostname       = $AssetTelemetry.ComputerName
         os_version     = $AssetTelemetry.OsVersion
         ram_gb         = $AssetTelemetry.MemoryGB
-        status_label   = "Deployed - Compliant"
+        status_label   = "Deployed"
     }
 
     return [PSCustomObject]@{
@@ -93,7 +93,7 @@ elseif ($DemoMode) {
         OsVersion               = "Microsoft Windows 11 Enterprise (10.0.22631)"
         MemoryGB                = 32
         UptimeDays              = 4.2
-        WmiRepositoryConsistent = $true
+        WmiServiceRunning       = $true
         WinRmServiceRunning     = $true
         HungServices            = @()
     }
@@ -105,6 +105,7 @@ else {
     $uptime = [Math]::Round(([DateTime]::UtcNow - $os.LastBootUpTime.ToUniversalTime()).TotalDays, 1)
     $ramGb = [Math]::Round($cs.TotalPhysicalMemory / 1GB, 0)
     $winrm = Get-Service -Name 'WinRM' -ErrorAction SilentlyContinue
+    $wmi = Get-Service -Name 'Winmgmt' -ErrorAction SilentlyContinue
     $hung = @(Get-CimInstance -ClassName Win32_Service -Filter "State='Stop Pending' OR State='Start Pending'" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
 
     [PSCustomObject]@{
@@ -115,7 +116,7 @@ else {
         OsVersion               = "$($os.Caption) ($($os.Version))"
         MemoryGB                = $ramGb
         UptimeDays              = $uptime
-        WmiRepositoryConsistent = $true
+        WmiServiceRunning       = ($null -ne $wmi -and $wmi.Status -eq 'Running')
         WinRmServiceRunning     = ($null -ne $winrm -and $winrm.Status -eq 'Running')
         HungServices            = $hung
     }

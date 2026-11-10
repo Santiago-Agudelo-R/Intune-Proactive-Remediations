@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    MSP / Intune System Health & Backup Readiness Detection: Audits VSS Writers, Windows Update Services, and Disk Free Space.
+    Intune System Health & Backup Readiness Detection: Audits VSS Writers, Windows Update Services, and Disk Free Space.
 
 .DESCRIPTION
-    Designed for Centralized Services / RMM (Intune, Kaseya VSAx, Datto/Autotask) recurring health checks:
+    Designed for Intune Remediations or RMM script policies (for example GoTo Resolve or Syncro) as recurring health checks:
     1. Volume Shadow Copy Service (VSS) Writers: Ensures zero VSS writers are in a failed/retryable state prior to nightly backup windows.
     2. Patching Services: Verifies Windows Update (wuauserv), Background Intelligent Transfer (BITS), and Cryptographic Services (CryptSvc) are operational.
     3. Storage Pressure: Flags system drives with less than MinimumFreePercent (default: 10%) free space.
@@ -70,19 +70,40 @@ function Test-SystemBackupAndPatchReadiness {
     }
 }
 
+function Get-FailedVssWriter {
+    <#
+        Parses "vssadmin list writers" without depending on the OS language. Labels such as
+        "Writer name" and "State" are translated on non-English Windows (for example
+        "Nombre del escritor" on es-CO), but each writer block always contains the quoted writer
+        name and a numeric state code such as "[1]". State 1 means Stable.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$VssAdminOutput
+    )
+
+    $failed = [System.Collections.Generic.List[string]]::new()
+    foreach ($block in ($VssAdminOutput -split '\r?\n\s*\r?\n')) {
+        if ($block -match "'([^']+)'") {
+            $writerName = $Matches[1]
+            if ($block -match '\[(\d+)\]' -and $Matches[1] -ne '1') {
+                $failed.Add($writerName)
+            }
+        }
+    }
+    return $failed.ToArray()
+}
+
 try {
     $telemetry = if ($PSBoundParameters.ContainsKey('MockTelemetry') -and $null -ne $MockTelemetry) {
         $MockTelemetry
     }
     else {
         $vssOutput = vssadmin list writers 2>&1 | Out-String
-        $failedWriters = [System.Collections.Generic.List[string]]::new()
-        $writerBlocks = $vssOutput -split "Writer name:"
-        foreach ($block in $writerBlocks) {
-            if ($block -match "^\s*'([^']+)'" -and $block -notmatch "State:\s*\[1\]\s*Stable") {
-                $failedWriters.Add($Matches[1])
-            }
-        }
+        $failedWriters = @(Get-FailedVssWriter -VssAdminOutput $vssOutput)
 
         $stoppedSvcs = [System.Collections.Generic.List[string]]::new()
         foreach ($svcName in @('VSS', 'CryptSvc', 'BITS', 'wuauserv')) {
@@ -96,7 +117,7 @@ try {
         $freePct = [Math]::Round(($sysDrive.FreeSpace / $sysDrive.Size) * 100, 1)
 
         [PSCustomObject]@{
-            FailedVssWriters    = $failedWriters.ToArray()
+            FailedVssWriters    = $failedWriters
             StoppedCoreServices = $stoppedSvcs.ToArray()
             FreeDiskPercent     = $freePct
         }

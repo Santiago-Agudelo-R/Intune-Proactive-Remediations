@@ -1,13 +1,15 @@
 <#
 .SYNOPSIS
-    Intune Proactive Remediation: Enables or resumes BitLocker protection and escrows RecoveryPassword to Entra ID.
+    Intune Proactive Remediation: Resumes BitLocker protection and escrows the RecoveryPassword to Entra ID.
 
 .DESCRIPTION
     Executes in 64-bit SYSTEM context via Microsoft Intune Management Extension:
-    1. If VolumeStatus is 'FullyDecrypted', enables BitLocker with XtsAes256 and TPM + RecoveryPassword protectors.
+    1. If VolumeStatus is 'FullyDecrypted', exits without changes: initial encryption is owned by the
+       Intune Endpoint Security disk encryption policy, not by this script.
     2. Creates a RecoveryPassword protector if missing on $env:SystemDrive.
     3. Resumes BitLocker protection if currently suspended (ProtectionStatus = Off).
     4. Escrows the 48-digit RecoveryPassword protector to Microsoft Entra ID via BackupToAAD-BitLockerKeyProtector.
+       Escrowing again is safe; Entra ID keeps the key linked to the device.
 #>
 
 [CmdletBinding()]
@@ -24,10 +26,10 @@ try {
     $vol = Get-BitLockerVolume -MountPoint $mount -ErrorAction Stop
 
     if ($vol.VolumeStatus -eq 'FullyDecrypted') {
-        if (-not $WhatIfMode) {
-            $null = Enable-BitLocker -MountPoint $mount -EncryptionMethod XtsAes256 -UsedSpaceOnly -TpmProtector -SkipHardwareTest -ErrorAction Stop
-            $vol = Get-BitLockerVolume -MountPoint $mount -ErrorAction Stop
-        }
+        # Out of scope by design: initial encryption belongs to the Intune Endpoint Security
+        # disk encryption policy. Enabling BitLocker from a remediation script would conflict with it.
+        Write-Output "SKIPPED: Volume $mount is FullyDecrypted. Assign the Intune disk encryption policy to this device; this script only fixes protection and escrow."
+        exit 1
     }
 
     $recoveryProtector = $vol.KeyProtector | Where-Object { $_.KeyProtectorType -eq 'RecoveryPassword' } | Select-Object -First 1
@@ -50,7 +52,12 @@ try {
         $null = BackupToAAD-BitLockerKeyProtector -MountPoint $mount -KeyProtectorId $recoveryProtector.KeyProtectorId -ErrorAction Stop
     }
 
-    Write-Output "REMEDIATED: BitLocker protection verified and RecoveryPassword escrowed for volume $mount."
+    if ($WhatIfMode) {
+        Write-Output "WHATIF: Would resume protection if suspended, add a RecoveryPassword protector if missing, and escrow it to Entra ID for volume $mount."
+        exit 0
+    }
+
+    Write-Output "REMEDIATED: Protection verified and RecoveryPassword $($recoveryProtector.KeyProtectorId) escrowed to Entra ID for volume $mount."
     exit 0
 }
 catch {
