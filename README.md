@@ -43,6 +43,26 @@ Before enabling enforcement:
 
 ---
 
+## Sample Detection & Remediation Flow
+
+Intune captures the final `STDOUT` line and the process exit code (`0` = compliant, `1` = trigger remediation):
+
+```text
+# 1. Pre-Remediation Detection (Detect-BitLockerEscrow.ps1 -> Exit Code 1)
+NON-COMPLIANT: Volume C: is encrypted (XtsAes256), but no Event ID 845 escrow confirmation was found for protector {4B9D1E2A-...}.
+
+# 2. Remediation Execution (Remediate-BitLockerEscrow.ps1 -> Exit Code 0)
+REMEDIATED: Escrowed RecoveryPassword protector {4B9D1E2A-...} to Entra ID and verified Event ID 845.
+
+# 3. Post-Remediation Detection (Detect-BitLockerEscrow.ps1 -> Exit Code 0)
+COMPLIANT: Volume C: ProtectionStatus=On, EncryptionPercentage=100%, Protector={4B9D1E2A-...} verified in Event ID 845.
+```
+
+### Operational Considerations (`SystemHealth-VSS-Patching`)
+`Remediate-SystemBackupAndPatchHealth.ps1` re-enables and restarts `VSS`, `swprv`, `wuauserv`, `bits`, and `cryptsvc` only after `Detect-SystemBackupAndPatchHealth.ps1` returns `exit 1`. Schedule this package prior to nightly backup or maintenance windows rather than during active VSS snapshot operations.
+
+---
+
 ## Tools
 
 | Script | Purpose |
