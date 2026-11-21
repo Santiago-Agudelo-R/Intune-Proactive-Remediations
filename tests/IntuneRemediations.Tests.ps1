@@ -80,68 +80,88 @@ Describe 'Detect-BitLockerEscrow' {
     }
 }
 
-Describe 'LocalAdmin-Hygiene (Detect & Remediate Contract, SID & Localization)' {
+Describe 'LocalAdmin-Hygiene (shared SID-based approval for Detect and Remediate)' {
 
-    It 'returns Compliant (ExitCode 0) when only baseline approved principals are present' {
-        $members = @('WKSTN-01\Administrator', 'WKSTN-01\LAPS_Admin', 'CORP\Domain Admins')
-        $res = & $script:AdminDetect -TestMembers $members -LocalHostName 'WKSTN-01' -NoExit
-        $res.Compliant | Should -BeTrue
-        $res.ExitCode | Should -Be 0
-        @($res.UnauthorizedMembers).Count | Should -Be 0
+    BeforeAll {
+        $script:MachineSid = 'S-1-5-21-1000-2000-3000'
+        $script:DomainSid = 'S-1-5-21-9000-8000-7000'
+
+        function Invoke-LocalAdminPair {
+            param ([object[]]$Members, [hashtable]$Options = @{})
+            $common = @{ TestMembers = $Members; LocalMachineSid = $script:MachineSid; NoExit = $true } + $Options
+            [PSCustomObject]@{
+                Detect    = & $script:AdminDetect @common
+                Remediate = & $script:AdminRemediate @common
+            }
+        }
     }
 
-    It 'approves Spanish Windows built-in Administrador (RID -500) and Admins. del dominio (RID -512) by SID' {
-        $esMembers = @(
-            [PSCustomObject]@{ Name = 'EQUIPO-01\Administrador'; Sid = 'S-1-5-21-1000-2000-3000-500' },
-            [PSCustomObject]@{ Name = 'EMPRESA\Admins. del dominio'; Sid = 'S-1-5-21-9000-8000-7000-512' },
-            [PSCustomObject]@{ Name = 'EQUIPO-01\LAPS_Admin'; Sid = 'S-1-5-21-1000-2000-3000-1005' }
-        )
-        $detectRes = & $script:AdminDetect -TestMembers $esMembers -LocalHostName 'EQUIPO-01' -NoExit
-        $remRes = & $script:AdminRemediate -TestMembers $esMembers -LocalHostName 'EQUIPO-01' -NoExit
-
-        $detectRes.Compliant | Should -BeTrue
-        $remRes.Compliant | Should -BeTrue
-    }
-
-    It 'honors Entra ID role SIDs identically in both Detect and Remediate (preventing infinite remediation loops)' {
-        $roleSid = '^S-1-12-1-1111111111-2222222222-3333333333-4444444444$'
-        $approvedSids = @(
-            '^S-1-5-21-\d+-\d+-\d+-500$',
-            $roleSid
-        )
+    It 'approves the Spanish built-in Administrador and your own Admins. del dominio by SID' {
         $members = @(
-            [PSCustomObject]@{ Name = 'WKSTN-01\Administrator'; Sid = 'S-1-5-21-100-200-300-500' },
-            [PSCustomObject]@{ Name = 'AzureAD\DeviceLocalAdminRole'; Sid = 'S-1-12-1-1111111111-2222222222-3333333333-4444444444' }
+            [PSCustomObject]@{ Name = 'EQUIPO-01\Administrador'; Sid = "$script:MachineSid-500" },
+            [PSCustomObject]@{ Name = 'EMPRESA\Admins. del dominio'; Sid = "$script:DomainSid-512" }
         )
-
-        $detectRes = & $script:AdminDetect -TestMembers $members -ApprovedSids $approvedSids -LocalHostName 'WKSTN-01' -NoExit
-        $remRes = & $script:AdminRemediate -TestMembers $members -ApprovedSids $approvedSids -LocalHostName 'WKSTN-01' -NoExit
-
-        $detectRes.Compliant | Should -BeTrue
-        $remRes.Compliant | Should -BeTrue
+        $r = Invoke-LocalAdminPair -Members $members -Options @{ ApprovedDomainSid = $script:DomainSid }
+        $r.Detect.Compliant | Should -BeTrue
+        $r.Detect.ExitCode | Should -Be 0
+        $r.Remediate.Compliant | Should -BeTrue
     }
 
-    It 'rejects spoofed LAPS_Admin or Administrator accounts from foreign domains or non-500 RIDs' {
+    It 'rejects Domain Admins and RID-500 accounts from any other domain' {
         $members = @(
-            [PSCustomObject]@{ Name = 'WKSTN-01\Administrator'; Sid = 'S-1-5-21-100-200-300-500' },
-            [PSCustomObject]@{ Name = 'ROGUEDOM\LAPS_Admin'; Sid = 'S-1-5-21-999-888-777-1104' },
-            [PSCustomObject]@{ Name = 'ROGUEDOM\Administrator'; Sid = 'S-1-5-21-999-888-777-1105' }
+            [PSCustomObject]@{ Name = 'EQUIPO-01\Administrator'; Sid = "$script:MachineSid-500" },
+            [PSCustomObject]@{ Name = 'OTHER\Domain Admins'; Sid = 'S-1-5-21-5-6-7-512' },
+            [PSCustomObject]@{ Name = 'OTHER\Administrator'; Sid = 'S-1-5-21-5-6-7-500' }
         )
+        $r = Invoke-LocalAdminPair -Members $members -Options @{ ApprovedDomainSid = $script:DomainSid }
+        $r.Detect.UnauthorizedMembers | Should -Be @('OTHER\Domain Admins', 'OTHER\Administrator')
+        @($r.Remediate.Targets).Count | Should -Be 2
+    }
 
-        $res = & $script:AdminDetect -TestMembers $members -LocalHostName 'WKSTN-01' -NoExit
+    It 'does not approve a local account just because of its name (attacker-created LAPS_Admin)' {
+        $members = @([PSCustomObject]@{ Name = 'EQUIPO-01\LAPS_Admin'; Sid = "$script:MachineSid-1005" })
+        $r = Invoke-LocalAdminPair -Members $members
+        $r.Detect.Compliant | Should -BeFalse
+        $r.Remediate.Compliant | Should -BeFalse
+    }
+
+    It 'approves an explicitly listed local account only when its SID belongs to this machine' {
+        $local = @([PSCustomObject]@{ Name = 'EQUIPO-01\LAPS_Admin'; Sid = "$script:MachineSid-1005" })
+        $foreign = @([PSCustomObject]@{ Name = 'OTHER\LAPS_Admin'; Sid = 'S-1-5-21-5-6-7-1005' })
+        (Invoke-LocalAdminPair -Members $local -Options @{ ApprovedLocalAccounts = @('LAPS_Admin') }).Detect.Compliant | Should -BeTrue
+        (Invoke-LocalAdminPair -Members $foreign -Options @{ ApprovedLocalAccounts = @('LAPS_Admin') }).Detect.Compliant | Should -BeFalse
+    }
+
+    It 'honors Entra ID role SIDs identically in Detect and Remediate, including unresolved SIDs' {
+        $roleSid = 'S-1-12-1-1111111111-2222222222-3333333333-4444444444'
+        $r = Invoke-LocalAdminPair -Members @($roleSid) -Options @{ ApprovedSids = @($roleSid) }
+        $r.Detect.Compliant | Should -BeTrue
+        $r.Remediate.Compliant | Should -BeTrue
+    }
+
+    It 'compares plain SID entries exactly, never as a prefix' {
+        $r = Invoke-LocalAdminPair -Members @('S-1-12-1-1111-2222-3333-44445') -Options @{ ApprovedSids = @('S-1-12-1-1111-2222-3333-4444') }
+        $r.Detect.Compliant | Should -BeFalse
+    }
+
+    It 'requires the domain SID to match for name-approved domain groups' {
+        $options = @{ ApprovedDomainSid = $script:DomainSid; ApprovedDomainAccounts = @('CORP\SecOps') }
+        $good = @([PSCustomObject]@{ Name = 'CORP\SecOps'; Sid = "$script:DomainSid-1200" })
+        $bad = @([PSCustomObject]@{ Name = 'CORP\SecOps'; Sid = 'S-1-5-21-5-6-7-1200' })
+        (Invoke-LocalAdminPair -Members $good -Options $options).Detect.Compliant | Should -BeTrue
+        (Invoke-LocalAdminPair -Members $bad -Options $options).Detect.Compliant | Should -BeFalse
+    }
+
+    It 'does not approve regular Entra ID users' {
+        $members = @([PSCustomObject]@{ Name = 'AzureAD\JohnDoe'; Sid = 'S-1-12-1-999999999-111111111-222222222-333333333' })
+        (Invoke-LocalAdminPair -Members $members).Detect.UnauthorizedMembers | Should -Be @('AzureAD\JohnDoe')
+    }
+
+    It 'fails closed when the machine SID cannot be resolved' {
+        $res = & $script:AdminDetect -TestMembers @('X\y') -LocalMachineSid 'not-a-sid' -NoExit
         $res.Compliant | Should -BeFalse
         $res.ExitCode | Should -Be 1
-        $res.UnauthorizedMembers | Should -Be @('ROGUEDOM\LAPS_Admin', 'ROGUEDOM\Administrator')
-    }
-
-    It 'does not approve regular Entra ID users by default (AzureAD\* is not a wildcard allowlist)' {
-        $members = @(
-            [PSCustomObject]@{ Name = 'WKSTN-01\Administrator'; Sid = 'S-1-5-21-100-200-300-500' },
-            [PSCustomObject]@{ Name = 'AzureAD\JohnDoe'; Sid = 'S-1-12-1-999999999-111111111-222222222-333333333' }
-        )
-        $res = & $script:AdminDetect -TestMembers $members -LocalHostName 'WKSTN-01' -NoExit
-        $res.Compliant | Should -BeFalse
-        $res.UnauthorizedMembers | Should -Be @('AzureAD\JohnDoe')
+        $res.Message | Should -Match 'refusing to evaluate'
     }
 }
 
@@ -257,6 +277,38 @@ Describe 'Detect-DefenderSensorHealth' {
         $res.Compliant | Should -BeFalse
         $res.ExitCode | Should -Be 1
         @($res.Issues).Count | Should -Be 4
+    }
+}
+
+Describe 'Detect-DefenderSensorHealth (passive mode and unknown Tamper Protection)' {
+    It 'does not flag real-time or behavior monitoring when Defender runs in Passive mode' {
+        $mock = [PSCustomObject]@{
+            WinDefendServiceState     = 'Running'
+            MdeOnboarded              = $true
+            SenseServiceState         = 'Running'
+            RealTimeProtectionEnabled = $false
+            BehaviorMonitorEnabled    = $false
+            IsTamperProtected         = $false
+            AMRunningMode             = 'Passive Mode'
+            SignatureAgeDays          = 1
+        }
+        $res = & $script:DefenderDetect -MockTelemetry $mock -NoExit
+        $res.Compliant | Should -BeTrue
+    }
+
+    It 'reports Tamper Protection as unknown instead of assuming it is on' {
+        $mock = [PSCustomObject]@{
+            WinDefendServiceState     = 'Running'
+            MdeOnboarded              = $false
+            SenseServiceState         = 'Stopped'
+            RealTimeProtectionEnabled = $true
+            BehaviorMonitorEnabled    = $true
+            IsTamperProtected         = $null
+            SignatureAgeDays          = 1
+        }
+        $res = & $script:DefenderDetect -MockTelemetry $mock -NoExit
+        $res.Compliant | Should -BeFalse
+        $res.Issues | Should -Be @('TamperProtectionUnknown')
     }
 }
 

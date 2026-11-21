@@ -1,35 +1,44 @@
 <#
 .SYNOPSIS
-    Intune Proactive Remediation Detection: Audits local Administrators group membership by SID and machine-scoped allowlist.
+    Intune Remediations detection: flags members of the local Administrators group that are not approved.
 
 .DESCRIPTION
-    Enumerates members of the built-in Administrators group (SID S-1-5-32-544) and evaluates each
-    member using the same SID-first logic as Remediate-UnauthorizedLocalAdmins.ps1:
-    1. Built-in Local Administrator (RID -500) and Domain/Enterprise Admins (RID -512 / -519) are
-       approved by SID regardless of OS display language (e.g. "Administrator" vs "Administrador"
-       or "Domain Admins" vs "Admins. del dominio" on Spanish es-CO/es-ES Windows).
-    2. Explicit Entra ID role SIDs (S-1-12-1-...) and domain security group SIDs in $ApprovedSids
-       are matched directly against each member's SID so detection and remediation never diverge.
-    3. Local management accounts (such as LAPS_Admin) are only approved when scoped to the local
-       ComputerName (<ComputerName>\LAPS_Admin), preventing cross-domain account name spoofing.
+    Enumerates the built-in Administrators group (S-1-5-32-544) and evaluates every member with
+    Test-IsApprovedLocalAdmin, the same function Remediate-UnauthorizedLocalAdmins.ps1 uses, so the
+    pair cannot disagree and loop.
+
+    Approval is SID-based and therefore language-independent ("Administrator" / "Administrador",
+    "Domain Admins" / "Admins. del dominio"): the machine's own RID-500 account, your domain's -512/-519
+    groups (when ApprovedDomainSid is set) and any SID listed in ApprovedSids.
+
+    Exit 0 = only approved members. Exit 1 = unapproved members found, or the check could not run.
+
+    Limitation: this is a configuration-hygiene control. An attacker who already holds local admin
+    rights can tamper with any script running on the device; treat results as drift detection, not
+    as tamper-proof evidence.
+
+.PARAMETER ApprovedDomainSid
+    SID of your Active Directory domain (S-1-5-21-x-y-z). Approves that domain's Domain Admins (-512)
+    and Enterprise Admins (-519). Leave empty on Entra ID-only devices.
 
 .PARAMETER ApprovedSids
-    Exact SIDs or SID regex patterns for authorized roles/groups (RID -500, -512, -519 are built-in).
-
-.PARAMETER ApprovedLocalAccounts
-    Local administrator account names valid only when prefixed by the local machine name.
+    Exact SIDs, or regex patterns starting with '^', for Entra ID role SIDs or other approved groups.
 
 .PARAMETER ApprovedDomainAccounts
-    Explicitly domain-qualified group/account names (DOMAIN\GroupName) when SID resolution is unavailable.
+    DOMAIN\Name entries approved by name. When ApprovedDomainSid is set, the SID must also match it.
+
+.PARAMETER ApprovedLocalAccounts
+    Additional local account names approved only when their SID belongs to this machine. Empty by
+    default because a local administrator can create a local account with any name.
+
+.PARAMETER LocalMachineSid
+    Machine SID. Resolved automatically when empty; set explicitly only for offline tests.
 
 .PARAMETER TestMembers
-    Optional array of member objects (@{ Name = '...'; Sid = '...' }) or strings for offline Pester testing.
-
-.PARAMETER LocalHostName
-    Local machine name used to scope local accounts. Defaults to $env:COMPUTERNAME.
+    Member objects (@{ Name = '...'; Sid = '...' }) for offline Pester tests.
 
 .PARAMETER NoExit
-    Suppresses exit 0/1 termination for Pester unit tests and returns a result object.
+    Returns a result object instead of calling exit, for Pester tests.
 
 .NOTES
     Author: Santiago Agudelo
@@ -38,33 +47,39 @@
 
 [CmdletBinding()]
 param (
+    # Your AD domain SID (S-1-5-21-x-y-z). When set, that domain's Domain Admins (-512) and
+    # Enterprise Admins (-519) are approved. Other domains' -512/-519 groups are never approved.
     [Parameter(Mandatory = $false)]
-    [string[]]$ApprovedSids = @(
-        '^S-1-5-21-\d+-\d+-\d+-500$',
-        '^S-1-5-21-\d+-\d+-\d+-512$',
-        '^S-1-5-21-\d+-\d+-\d+-519$'
-        # Entra ID joined devices: add your tenant's role SIDs here (and in Remediate-UnauthorizedLocalAdmins.ps1):
-        # '^S-1-12-1-1111111111-2222222222-3333333333-4444444444$'  # Global Administrator role
-        # '^S-1-12-1-5555555555-6666666666-7777777777-8888888888$'  # Entra Joined Device Local Administrator role
-    ),
+    [AllowEmptyString()]
+    [string]$ApprovedDomainSid = '',
 
+    # Exact SIDs, or regex patterns that start with '^'. Entra ID joined devices: add your tenant's
+    # Global Administrator and "Microsoft Entra Joined Device Local Administrator" role SIDs, e.g.
+    # 'S-1-12-1-1111111111-2222222222-3333333333-4444444444'
     [Parameter(Mandatory = $false)]
-    [string[]]$ApprovedLocalAccounts = @(
-        'LAPS_Admin'
-    ),
+    [AllowEmptyCollection()]
+    [string[]]$ApprovedSids = @(),
 
+    # DOMAIN\Name entries, e.g. 'CORP\SecOps_Endpoint_Admins'. If $ApprovedDomainSid is set,
+    # the member's SID must also belong to that domain.
     [Parameter(Mandatory = $false)]
-    [string[]]$ApprovedDomainAccounts = @(
-        'CORP\Domain Admins',
-        'CORP\Admins. del dominio',
-        'CORP\SecOps_Endpoint_Admins'
-    ),
+    [AllowEmptyCollection()]
+    [string[]]$ApprovedDomainAccounts = @(),
+
+    # Extra local accounts approved by name (for example a custom LAPS account). Empty by default on
+    # purpose: anyone who already has local admin rights can create a local account with any name.
+    # Prefer Windows LAPS managing the built-in RID-500 account, which is approved by SID.
+    [Parameter(Mandatory = $false)]
+    [AllowEmptyCollection()]
+    [string[]]$ApprovedLocalAccounts = @(),
+
+    # Resolved automatically from the local accounts when empty. Exposed for offline tests.
+    [Parameter(Mandatory = $false)]
+    [AllowEmptyString()]
+    [string]$LocalMachineSid = '',
 
     [Parameter(Mandatory = $false)]
     [object[]]$TestMembers,
-
-    [Parameter(Mandatory = $false)]
-    [string]$LocalHostName = $env:COMPUTERNAME,
 
     [Parameter(Mandatory = $false)]
     [switch]$NoExit
@@ -72,6 +87,23 @@ param (
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# --- Shared approval logic (keep identical to Remediate-UnauthorizedLocalAdmins.ps1) ---
+function Get-LocalMachineSid {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param ()
+
+    # Every local account SID is <machine SID>-<RID>; the built-in Administrator always exists (RID 500).
+    try {
+        $account = Get-LocalUser -ErrorAction Stop | Select-Object -First 1
+        return [string]$account.SID.AccountDomainSid.Value
+    }
+    catch {
+        $account = Get-CimInstance -ClassName Win32_UserAccount -Filter 'LocalAccount = True' -ErrorAction Stop | Select-Object -First 1
+        return ([string]$account.SID -replace '-\d+$', '')
+    }
+}
 
 function Get-LocalAdminMember {
     [CmdletBinding()]
@@ -102,36 +134,36 @@ function Get-LocalAdminMember {
     }
 }
 
-function ConvertTo-NormalizedAdminMember {
+function ConvertTo-AdminMember {
     [CmdletBinding()]
     [OutputType([PSCustomObject[]])]
     param (
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
-        [object[]]$RawMembers
+        [object[]]$InputObject
     )
 
-    $normalized = [System.Collections.Generic.List[PSCustomObject]]::new()
-    foreach ($item in $RawMembers) {
-        if ($item -is [string]) {
-            $normalized.Add([PSCustomObject]@{
-                Name = $item
-                Sid  = if ($item -match '^S-1-\d+-') { $item } else { $null }
-            })
+    $members = foreach ($item in $InputObject) {
+        $name = if ($item -is [string]) { $item } elseif ($item.PSObject.Properties['Name']) { [string]$item.Name } else { $null }
+        $sid = if ($item -isnot [string] -and $item.PSObject.Properties['Sid']) { [string]$item.Sid } else { $null }
+        # Unresolvable members (common for Entra ID role SIDs) are reported by their raw SID as the name.
+        if ([string]::IsNullOrWhiteSpace($sid) -and $name -match '^S-1-\d+(-\d+)+$') {
+            $sid = $name
         }
-        else {
-            $nameVal = if ($item.PSObject.Properties['Name']) { [string]$item.Name } else { [string]$item }
-            $sidVal = if ($item.PSObject.Properties['Sid']) { [string]$item.Sid } elseif ($item.PSObject.Properties['SID']) { [string]$item.SID } else { $null }
-            $normalized.Add([PSCustomObject]@{
-                Name = $nameVal
-                Sid  = $sidVal
-            })
-        }
+        [PSCustomObject]@{ Name = $name; Sid = $sid }
     }
-    return , $normalized.ToArray()
+    return , @($members)
 }
 
 function Test-IsApprovedLocalAdmin {
+    <#
+        Single source of truth for both Detect and Remediate. Approval is by SID first:
+          - <this machine SID>-500  built-in Administrator, in any display language
+          - <ApprovedDomainSid>-512/-519  Domain/Enterprise Admins of YOUR domain only
+          - $ApprovedSids  exact SIDs (or '^'-anchored regex) such as Entra ID role SIDs
+        Name-based approval is limited to DOMAIN\Name entries (optionally SID-checked) and to
+        explicitly listed local accounts whose SID belongs to this machine.
+    #>
     [CmdletBinding()]
     [OutputType([bool])]
     param (
@@ -139,62 +171,54 @@ function Test-IsApprovedLocalAdmin {
         [PSCustomObject]$Member,
 
         [Parameter(Mandatory = $true)]
-        [string[]]$SidPatterns,
+        [string]$MachineSid,
 
-        [Parameter(Mandatory = $true)]
-        [string[]]$LocalAccounts,
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
+        [string]$DomainSid = '',
 
-        [Parameter(Mandatory = $true)]
-        [string[]]$DomainAccounts,
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyCollection()]
+        [string[]]$Sids = @(),
 
-        [Parameter(Mandatory = $true)]
-        [string]$LocalMachineName
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyCollection()]
+        [string[]]$DomainAccounts = @(),
+
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyCollection()]
+        [string[]]$LocalAccounts = @()
     )
 
-    # 1. SID evaluation (primary, language-independent, non-spoofable)
-    if (-not [string]::IsNullOrWhiteSpace($Member.Sid)) {
-        foreach ($sidPattern in $SidPatterns) {
-            if ($Member.Sid -match $sidPattern) {
-                return $true
-            }
-        }
-    }
+    $sid = [string]$Member.Sid
+    $name = [string]$Member.Name
 
-    $memberName = [string]$Member.Name
-    if ([string]::IsNullOrWhiteSpace($memberName)) {
-        return $false
-    }
+    if (-not [string]::IsNullOrWhiteSpace($sid)) {
+        if ($sid -eq "$MachineSid-500") { return $true }
 
-    # If the member name itself is a raw SID (e.g., unresolved Entra ID role SID), check against SidPatterns
-    if ($memberName -match '^S-1-\d+-') {
-        foreach ($sidPattern in $SidPatterns) {
-            if ($memberName -match $sidPattern) {
-                return $true
-            }
-        }
-    }
-
-    # 2. Machine-scoped local account check (<LocalMachineName>\AccountName)
-    # Prevents spoofing where a foreign domain account is named LAPS_Admin or Administrator.
-    $escapedMachine = [regex]::Escape($LocalMachineName)
-    foreach ($localAcc in $LocalAccounts) {
-        $escapedAcc = [regex]::Escape($localAcc)
-        if ($memberName -match "(?i)^${escapedMachine}\\${escapedAcc}$") {
+        if (-not [string]::IsNullOrWhiteSpace($DomainSid) -and ($sid -eq "$DomainSid-512" -or $sid -eq "$DomainSid-519")) {
             return $true
         }
-    }
 
-    # Built-in local Administrator fallback when SID was not supplied in string-only test mode,
-    # strictly scoped to the local machine name (never matches OTHERDOMAIN\Administrator).
-    if ([string]::IsNullOrWhiteSpace($Member.Sid) -and $memberName -match "(?i)^${escapedMachine}\\(Administrator|Administrador)$") {
-        return $true
-    }
-
-    # 3. Explicitly domain-qualified group/account names
-    foreach ($domAcc in $DomainAccounts) {
-        if ($memberName.Equals($domAcc, [System.StringComparison]::OrdinalIgnoreCase)) {
-            return $true
+        foreach ($entry in $Sids) {
+            if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+            # Plain entries are compared exactly so 'S-1-12-1-1-2' can never match 'S-1-12-1-1-23'.
+            $isMatch = if ($entry.StartsWith('^')) { $sid -match $entry } else { $sid -eq $entry }
+            if ($isMatch) { return $true }
         }
+    }
+
+    $parts = @($name -split '\\', 2)
+    if ($parts.Count -ne 2) { return $false }
+
+    $isLocalAccount = (-not [string]::IsNullOrWhiteSpace($sid)) -and $sid.StartsWith("$MachineSid-")
+    if ($isLocalAccount) {
+        return ($parts[1] -in $LocalAccounts)
+    }
+
+    if ($name -in $DomainAccounts) {
+        if ([string]::IsNullOrWhiteSpace($DomainSid)) { return $true }
+        return ((-not [string]::IsNullOrWhiteSpace($sid)) -and $sid.StartsWith("$DomainSid-"))
     }
 
     return $false
@@ -202,96 +226,78 @@ function Test-IsApprovedLocalAdmin {
 
 function Find-UnauthorizedLocalAdmin {
     [CmdletBinding()]
-    [OutputType([PSCustomObject])]
+    [OutputType([PSCustomObject[]])]
     param (
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
         [PSCustomObject[]]$Members,
 
         [Parameter(Mandatory = $true)]
-        [string[]]$SidPatterns,
-
-        [Parameter(Mandatory = $true)]
-        [string[]]$LocalAccounts,
-
-        [Parameter(Mandatory = $true)]
-        [string[]]$DomainAccounts,
-
-        [Parameter(Mandatory = $true)]
-        [string]$LocalMachineName
+        [hashtable]$Policy
     )
 
-    $unauthorized = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($member in $Members) {
-        $isApproved = Test-IsApprovedLocalAdmin `
-            -Member $member `
-            -SidPatterns $SidPatterns `
-            -LocalAccounts $LocalAccounts `
-            -DomainAccounts $DomainAccounts `
-            -LocalMachineName $LocalMachineName
-
-        if (-not $isApproved) {
-            $label = if (-not [string]::IsNullOrWhiteSpace($member.Name)) { $member.Name } else { $member.Sid }
-            $unauthorized.Add($label)
-        }
+    $unauthorized = foreach ($m in $Members) {
+        if (-not (Test-IsApprovedLocalAdmin -Member $m @Policy)) { $m }
     }
-
-    if ($unauthorized.Count -gt 0) {
-        $joined = $unauthorized -join '; '
-        return [PSCustomObject]@{
-            Compliant           = $false
-            ExitCode            = 1
-            UnauthorizedMembers = $unauthorized.ToArray()
-            Message             = "NON-COMPLIANT: Unauthorized local administrators detected ($($unauthorized.Count)): $joined"
-        }
-    }
-
-    return [PSCustomObject]@{
-        Compliant           = $true
-        ExitCode            = 0
-        UnauthorizedMembers = @()
-        Message             = "COMPLIANT: Local Administrators group contains only approved principals ($($Members.Count) total)."
-    }
+    return , @($unauthorized)
 }
 
+function Get-MemberLabel {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param ([Parameter(Mandatory = $true)][PSCustomObject]$Member)
+
+    if (-not [string]::IsNullOrWhiteSpace($Member.Name)) { return $Member.Name }
+    return [string]$Member.Sid
+}
+# --- End of shared approval logic ---
+
 try {
-    $rawMembers = if ($PSBoundParameters.ContainsKey('TestMembers')) {
-        $TestMembers
+    $members = if ($PSBoundParameters.ContainsKey('TestMembers')) {
+        ConvertTo-AdminMember -InputObject $TestMembers
     }
     else {
-        Get-LocalAdminMember
+        ConvertTo-AdminMember -InputObject (Get-LocalAdminMember)
     }
 
-    $normalizedMembers = ConvertTo-NormalizedAdminMember -RawMembers $rawMembers
+    $machineSid = if ([string]::IsNullOrWhiteSpace($LocalMachineSid)) { Get-LocalMachineSid } else { $LocalMachineSid }
+    if ($machineSid -notmatch '^S-1-5-21-\d+-\d+-\d+$') {
+        throw "Could not resolve the local machine SID (got '$machineSid'); refusing to evaluate membership."
+    }
 
-    # In offline string-only test runs, infer machine prefix from the first local RID-500-like entry if ComputerName wasn't overridden
-    $effectiveComputerName = $LocalHostName
-    if ($PSBoundParameters.ContainsKey('TestMembers') -and (-not $PSBoundParameters.ContainsKey('LocalHostName'))) {
-        foreach ($m in $normalizedMembers) {
-            if ($m.Name -match '^([^\\]+)\\(Administrator|Administrador|LAPS_Admin)$' -and $Matches[1] -notmatch '^(?i)(CORP|AzureAD|CONTOSO|ROGUEDOM)$') {
-                $effectiveComputerName = $Matches[1]
-                break
-            }
+    $policy = @{
+        MachineSid     = $machineSid
+        DomainSid      = $ApprovedDomainSid
+        Sids           = $ApprovedSids
+        DomainAccounts = $ApprovedDomainAccounts
+        LocalAccounts  = $ApprovedLocalAccounts
+    }
+    $unauthorized = Find-UnauthorizedLocalAdmin -Members $members -Policy $policy
+
+    $result = if ($unauthorized.Count -gt 0) {
+        $labels = @($unauthorized | ForEach-Object { Get-MemberLabel -Member $_ })
+        [PSCustomObject]@{
+            Compliant           = $false
+            ExitCode            = 1
+            UnauthorizedMembers = $labels
+            Message             = "NON-COMPLIANT: $($labels.Count) unapproved local administrator(s): $($labels -join '; ')"
+        }
+    }
+    else {
+        [PSCustomObject]@{
+            Compliant           = $true
+            ExitCode            = 0
+            UnauthorizedMembers = @()
+            Message             = "COMPLIANT: All $($members.Count) local Administrators member(s) are approved."
         }
     }
 
-    $result = Find-UnauthorizedLocalAdmin `
-        -Members $normalizedMembers `
-        -SidPatterns $ApprovedSids `
-        -LocalAccounts $ApprovedLocalAccounts `
-        -DomainAccounts $ApprovedDomainAccounts `
-        -LocalMachineName $effectiveComputerName
-
-    if ($NoExit) {
-        return $result
-    }
-
+    if ($NoExit) { return $result }
     Write-Output $result.Message
     exit $result.ExitCode
 }
 catch {
-    $errMsg = "ERROR: Failed to query local Administrators group: $($_.Exception.Message)"
+    $errMsg = "ERROR: Local Administrators check failed: $($_.Exception.Message)"
     if ($NoExit) {
         return [PSCustomObject]@{ Compliant = $false; ExitCode = 1; UnauthorizedMembers = @(); Message = $errMsg }
     }

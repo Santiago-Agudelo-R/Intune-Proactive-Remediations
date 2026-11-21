@@ -10,7 +10,7 @@
     2. Evidence-Safe Storage Handling: Does not delete files from C:\Windows\Temp by default
        ($PurgeTempOnLowDisk = $false) because C:\Windows\Temp is a common attacker staging directory.
        When $PurgeTempOnLowDisk is explicitly enabled, cleanup only runs if free disk space is actually
-       below $MinimumFreePercent and no incident-response hold marker (C:\ProgramData\SecOps\IR_HOLD.lock)
+       below $MinimumFreePercent and no incident-response hold marker (%ProgramData%\SecOps\IR_HOLD.lock)
        is present.
 
 .NOTES
@@ -74,7 +74,7 @@ try {
         [PSCustomObject]@{
             FailedVssWriters = $failedWriters
             FreeDiskPercent  = $freePct
-            IrHoldPresent    = (Test-Path -LiteralPath 'C:\ProgramData\SecOps\IR_HOLD.lock')
+            IrHoldPresent    = (Test-Path -LiteralPath (Join-Path $env:ProgramData 'SecOps\IR_HOLD.lock'))
         }
     }
 
@@ -127,8 +127,13 @@ try {
                     $staleFiles = @(Get-ChildItem -LiteralPath $tempPath -File -Force -ErrorAction SilentlyContinue |
                         Where-Object { $_.LastWriteTimeUtc -lt $cutoff })
                     foreach ($f in $staleFiles) {
-                        Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
-                        $removedCount++
+                        try {
+                            Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
+                            $removedCount++
+                        }
+                        catch {
+                            Write-Verbose "Skipped locked or protected file: $($f.FullName)"
+                        }
                     }
                 }
             }

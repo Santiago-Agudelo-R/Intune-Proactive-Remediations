@@ -27,16 +27,31 @@ Every script pair in this repository follows the same conventions:
 | Package | Detection Script | Remediation Script | Run Context | Target Issue |
 | :--- | :--- | :--- | :--- | :--- |
 | **BitLocker-Escrow** | `Detect-BitLockerEscrow.ps1` | `Remediate-BitLockerEscrow.ps1` | `SYSTEM` (64-bit) | Detects suspended protection, a missing `RecoveryPassword` protector, or a protector with no escrow confirmation (Event ID 845). Resumes protection and escrows the key to Entra ID. |
-| **LocalAdmin-Hygiene** | `Detect-UnauthorizedLocalAdmins.ps1` | `Remediate-UnauthorizedLocalAdmins.ps1` | `SYSTEM` (64-bit) | Audits local `Administrators` (`S-1-5-32-544`) membership by SID (`RID -500`, `-512`, `-519`, and Entra ID role SIDs) and machine-scoped local accounts. Report-only by default. |
+| **LocalAdmin-Hygiene** | `Detect-UnauthorizedLocalAdmins.ps1` | `Remediate-UnauthorizedLocalAdmins.ps1` | `SYSTEM` (64-bit) | Audits local `Administrators` (`S-1-5-32-544`) membership by SID: this machine's RID-500, your domain's `-512`/`-519`, and listed Entra ID role SIDs. Report-only by default. |
 | **SystemHealth-VSS-Patching** | `Detect-SystemBackupAndPatchHealth.ps1` | `Remediate-SystemBackupAndPatchHealth.ps1` | `SYSTEM` (64-bit) | Pre-backup and patch window checklist: detects failed Volume Shadow Copy (VSS) writers, disabled Windows Update (`wuauserv`/`BITS`/`CryptSvc`) services, and system drive disk pressure. Selectively restarts VSS only when writers are failed. |
-| **Defender-SensorHealth** | `Detect-DefenderSensorHealth.ps1` | `Remediate-DefenderSensorHealth.ps1` | `SYSTEM` (64-bit) | Audits Microsoft Defender Antivirus (`WinDefend`), Defender for Endpoint sensor (`Sense`), Real-Time/Behavior Monitoring, Tamper Protection, and signature age (< 7 days). Restarts stopped sensor services and forces signature updates. |
+| **Defender-SensorHealth** | `Detect-DefenderSensorHealth.ps1` | `Remediate-DefenderSensorHealth.ps1` | `SYSTEM` (64-bit) | Audits Defender Antivirus (`WinDefend`), the Defender for Endpoint sensor (`Sense`, only when onboarded), Real-Time/Behavior Monitoring (skipped in Passive mode), Tamper Protection and signature age. Remediation restarts services, updates signatures and verifies the result. |
 
 ---
 
-## LocalAdmin-Hygiene: Entra ID joined & Spanish Windows devices
+## LocalAdmin-Hygiene: how approval works
 
-1. **Multilingual Windows (`es-CO` / `es-ES`):** Both `Detect-UnauthorizedLocalAdmins.ps1` and `Remediate-UnauthorizedLocalAdmins.ps1` approve the built-in local administrator (`RID -500`, e.g., `Administrador`) and Active Directory Domain/Enterprise Admins (`RID -512` / `-519`, e.g., `Admins. del dominio`) **by SID**, and scope local management accounts (such as `LAPS_Admin`) to `$env:COMPUTERNAME\LAPS_Admin` so foreign-domain accounts with the same name cannot bypass the allowlist.
-2. **Entra ID Role SIDs:** On Entra ID joined devices, the **Global Administrator** and **Microsoft Entra Joined Device Local Administrator** roles are added to the local Administrators group as SIDs that start with `S-1-12-1-`. Add your tenant's two role SIDs to `$ApprovedSids` in **both** scripts (both scripts evaluate `$ApprovedSids` identically).
+Both scripts contain the same `Test-IsApprovedLocalAdmin` function, so detection and remediation always reach the same verdict. Approval is by **SID**, which makes it independent of the Windows display language (`Administrator` / `Administrador`, `Domain Admins` / `Admins. del dominio`):
+
+| Approved member | How it is matched | Configuration |
+| :--- | :--- | :--- |
+| Built-in local Administrator | `<this machine's SID>-500` | Automatic |
+| Your Domain Admins / Enterprise Admins | `<ApprovedDomainSid>-512` / `-519` | Set `$ApprovedDomainSid` |
+| Entra ID role SIDs (Global Administrator, Entra Joined Device Local Administrator) | Exact SID in `$ApprovedSids` | Add your tenant's two role SIDs |
+| Other domain groups | `DOMAIN\Name` in `$ApprovedDomainAccounts`, SID must belong to `$ApprovedDomainSid` when set | Optional |
+| Extra local accounts | Name in `$ApprovedLocalAccounts` **and** SID belongs to this machine | Optional, empty by default |
+
+Design decisions:
+- `-500`, `-512` and `-519` from **other** domains are never approved, and plain SID entries are compared exactly (no prefix matches).
+- Local accounts are not approved by name by default: anyone who already has local admin rights can create `LAPS_Admin`. Let Windows LAPS manage the built-in RID-500 account instead, which is approved by SID.
+- If the machine SID cannot be resolved, both scripts fail closed and remediation removes nothing.
+- This is drift detection for configuration hygiene. An attacker who already holds local admin can tamper with anything that runs on the device, so this is not tamper-proof evidence.
+
+Because Intune Remediations cannot pass parameters, set these values by editing the defaults in **both** scripts before uploading them.
 
 ---
 
@@ -57,7 +72,7 @@ COMPLIANT: Volume C: ProtectionStatus=On, EncryptionPercentage=100%, Protector={
 
 ### Operational Considerations (`SystemHealth-VSS-Patching`)
 - **Selective VSS Restart:** `Remediate-SystemBackupAndPatchHealth.ps1` only restarts `VSS` and `CryptSvc` when `vssadmin list writers` reports at least one failed writer, preventing unnecessary disruption to running backups when the alert was triggered solely by low disk space or a disabled `wuauserv` service.
-- **Forensic Preservation (`C:\Windows\Temp`):** Because `C:\Windows\Temp` is frequently used by threat actors for staging, automatic temp file cleanup is disabled by default (`$PurgeTempOnLowDisk = $false`) and is also skipped if an incident-response hold file (`C:\ProgramData\SecOps\IR_HOLD.lock`) exists.
+- **Forensic Preservation (`C:\Windows\Temp`):** Because `C:\Windows\Temp` is frequently used by threat actors for staging, automatic temp file cleanup is disabled by default (`$PurgeTempOnLowDisk = $false`) and is also skipped if an incident-response hold file (`%ProgramData%\SecOps\IR_HOLD.lock`) exists.
 
 ---
 

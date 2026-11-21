@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-11-21
+
+### Security
+- **LocalAdmin-Hygiene:** RID `-500`, `-512` and `-519` are now approved only for this machine's SID and the configured `$ApprovedDomainSid`. Previously any domain's Domain Admins, Enterprise Admins or built-in Administrator was approved.
+- **LocalAdmin-Hygiene:** Local accounts are no longer approved by name by default. A name such as `LAPS_Admin` can be created by anyone with local admin rights; extra local accounts must be listed in `$ApprovedLocalAccounts` and their SID must belong to this machine.
+- **LocalAdmin-Hygiene:** Plain entries in `$ApprovedSids` are compared exactly instead of as unanchored regex, so one SID can no longer match a longer SID that starts with it.
+
+### Fixed
+- **LocalAdmin-Hygiene:** Detection and remediation share a byte-identical `Test-IsApprovedLocalAdmin`; removed test-only logic that guessed the computer name from hard-coded domain names.
+- **LocalAdmin-Hygiene:** Both scripts fail closed when the machine SID cannot be resolved.
+- **Defender-SensorHealth:** Onboarding to Defender for Endpoint is now read from `OnboardingState`; the `Sense` service ships with Windows 10/11 and its presence alone caused false positives on devices that are not onboarded.
+- **Defender-SensorHealth:** Real-time and behavior monitoring are not flagged when Defender Antivirus runs in Passive or EDR Block mode, and an unreadable Tamper Protection status is reported as `TamperProtectionUnknown` instead of being assumed on.
+- **Defender-SensorHealth:** Remediation no longer hides `Set-MpPreference` failures; it re-reads Defender status and exits 1 if protection is still off, so Intune does not report a false success.
+- **SystemHealth-VSS-Patching:** The Temp cleanup counts only files actually removed, and the IR hold marker path uses `%ProgramData%` instead of a hard-coded `C:` drive.
+
 ## [1.2.0] - 2026-11-21
 
 ### Fixed
