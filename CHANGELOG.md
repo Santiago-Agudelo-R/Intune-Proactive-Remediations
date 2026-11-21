@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-21
+
+### Fixed
+- **LocalAdmin-Hygiene (`Q7`, `Q8`, `S4`):** Unified `Detect-UnauthorizedLocalAdmins.ps1` and `Remediate-UnauthorizedLocalAdmins.ps1` around the same SID-first evaluation function (`Test-IsApprovedLocalAdmin`). Both scripts now evaluate `.Sid` against `$ApprovedSids` (eliminating detection/remediation loops on Entra ID role SIDs), approve built-in Local Administrator (`RID -500`) and Domain/Enterprise Admins (`RID -512` / `-519`) by SID across Spanish (`Administrador`, `Admins. del dominio`) and multilingual Windows builds, and scope local management accounts (`LAPS_Admin`) to `<ComputerName>\LAPS_Admin` to prevent cross-domain name spoofing.
+- **SystemHealth-VSS-Patching (`Q9`, `S5`):** `Remediate-SystemBackupAndPatchHealth.ps1` no longer deletes files from `C:\Windows\Temp` by default (`$PurgeTempOnLowDisk = $false`) to prevent destroying forensic staging artifacts, respects `C:\ProgramData\SecOps\IR_HOLD.lock`, and only restarts `VSS` when a VSS writer is actually in a failed state.
+- **Inventory Tool (`Q9`):** Aligned `tools/Invoke-EndpointSupportAndInventory.ps1` comment-based help with its exact implementation scope.
+
+### Added
+- **Defender-SensorHealth (`Detect-DefenderSensorHealth.ps1` / `Remediate-DefenderSensorHealth.ps1` — MITRE `T1562.001`):** Audits Microsoft Defender Antivirus (`WinDefend`) and Microsoft Defender for Endpoint sensor (`Sense`) service state, Real-Time Protection, Behavior Monitoring, Tamper Protection, and signature freshness (`MaxSignatureAgeDays = 7`).
+- Added Pester unit tests covering Spanish Windows SID approval, Entra ID role SID parity between detection and remediation, cross-domain name-spoofing rejection, selective VSS restart, and `Defender-SensorHealth`.
+
 ## [1.1.0] - 2026-11-09
 
 ### Fixed
@@ -28,7 +39,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-10-23
 
 ### Added
-- **BitLocker-Escrow (`Detect-BitLockerEscrow.ps1` / `Remediate-BitLockerEscrow.ps1`):** Audits OS volume encryption state, resumes suspended BitLocker protection, creates missing 48-digit `RecoveryPassword` protectors, and escrows recovery keys to Microsoft Entra ID.
-- **LocalAdmin-Hygiene (`Detect-UnauthorizedLocalAdmins.ps1` / `Remediate-UnauthorizedLocalAdmins.ps1`):** Audits local `Administrators` (`S-1-5-32-544`) membership against an approved enterprise allowlist and removes unauthorized accounts while protecting the built-in RID `-500` account.
-- **SystemHealth-VSS-Patching (`Detect-SystemBackupAndPatchHealth.ps1` / `Remediate-SystemBackupAndPatchHealth.ps1`):** Pre-backup and patch window checklist auditing Volume Shadow Copy (`vssadmin`) writer stability, `wuauserv`/`BITS`/`CryptSvc` service readiness, and system drive free space thresholds.
-- Offline Pester 5 unit test suite (`tests/IntuneRemediations.Tests.ps1`) validating exit code semantics (`0` vs `1`) across all three remediation packages.
+- Initial release of `BitLocker-Escrow`, `LocalAdmin-Hygiene`, and `SystemHealth-VSS-Patching` remediation pairs with Pester 5 test suite.

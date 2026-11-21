@@ -1,14 +1,18 @@
 <#
 .SYNOPSIS
-    PowerShell Endpoint Technical Support, Self-Healing & Hardware Asset Inventory (Snipe-IT / CMDB) Collector.
+    PowerShell Endpoint Support Diagnostics & Hardware Asset Inventory (Snipe-IT / CMDB) Collector.
 
 .DESCRIPTION
-    Combines automated endpoint support diagnostics with hardware asset lifecycle telemetry:
+    Combines endpoint support diagnostics with hardware asset inventory telemetry:
     1. Hardware & BIOS Inventory (Snipe-IT / CMDB Schema): Extracts SerialNumber, Manufacturer, Model,
-       TotalPhysicalMemoryGB, OS Build, UptimeDays, and CIS/NIST baseline posture.
-    2. Service & WMI Self-Healing: Detects services stuck in 'StopPending' or 'StartPending', verifies
+       TotalPhysicalMemoryGB, OS Build, and UptimeDays.
+    2. Service & Uptime Diagnostics: Detects services stuck in 'Stop Pending' or 'Start Pending', verifies
        that the WinRM and WMI (Winmgmt) services are running, and flags excessive uptime (>14 days).
     Supports -DemoMode for offline testing and Pester CI pipelines.
+
+.NOTES
+    Author: Santiago Agudelo
+    License: MIT
 #>
 
 [CmdletBinding()]
