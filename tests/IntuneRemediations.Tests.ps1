@@ -84,7 +84,7 @@ Describe 'LocalAdmin-Hygiene (Detect & Remediate Contract, SID & Localization)' 
 
     It 'returns Compliant (ExitCode 0) when only baseline approved principals are present' {
         $members = @('WKSTN-01\Administrator', 'WKSTN-01\LAPS_Admin', 'CORP\Domain Admins')
-        $res = & $script:AdminDetect -TestMembers $members -ComputerName 'WKSTN-01' -NoExit
+        $res = & $script:AdminDetect -TestMembers $members -LocalHostName 'WKSTN-01' -NoExit
         $res.Compliant | Should -BeTrue
         $res.ExitCode | Should -Be 0
         @($res.UnauthorizedMembers).Count | Should -Be 0
@@ -96,8 +96,8 @@ Describe 'LocalAdmin-Hygiene (Detect & Remediate Contract, SID & Localization)' 
             [PSCustomObject]@{ Name = 'EMPRESA\Admins. del dominio'; Sid = 'S-1-5-21-9000-8000-7000-512' },
             [PSCustomObject]@{ Name = 'EQUIPO-01\LAPS_Admin'; Sid = 'S-1-5-21-1000-2000-3000-1005' }
         )
-        $detectRes = & $script:AdminDetect -TestMembers $esMembers -ComputerName 'EQUIPO-01' -NoExit
-        $remRes = & $script:AdminRemediate -TestMembers $esMembers -ComputerName 'EQUIPO-01' -NoExit
+        $detectRes = & $script:AdminDetect -TestMembers $esMembers -LocalHostName 'EQUIPO-01' -NoExit
+        $remRes = & $script:AdminRemediate -TestMembers $esMembers -LocalHostName 'EQUIPO-01' -NoExit
 
         $detectRes.Compliant | Should -BeTrue
         $remRes.Compliant | Should -BeTrue
@@ -114,8 +114,8 @@ Describe 'LocalAdmin-Hygiene (Detect & Remediate Contract, SID & Localization)' 
             [PSCustomObject]@{ Name = 'AzureAD\DeviceLocalAdminRole'; Sid = 'S-1-12-1-1111111111-2222222222-3333333333-4444444444' }
         )
 
-        $detectRes = & $script:AdminDetect -TestMembers $members -ApprovedSids $approvedSids -ComputerName 'WKSTN-01' -NoExit
-        $remRes = & $script:AdminRemediate -TestMembers $members -ApprovedSids $approvedSids -ComputerName 'WKSTN-01' -NoExit
+        $detectRes = & $script:AdminDetect -TestMembers $members -ApprovedSids $approvedSids -LocalHostName 'WKSTN-01' -NoExit
+        $remRes = & $script:AdminRemediate -TestMembers $members -ApprovedSids $approvedSids -LocalHostName 'WKSTN-01' -NoExit
 
         $detectRes.Compliant | Should -BeTrue
         $remRes.Compliant | Should -BeTrue
@@ -128,7 +128,7 @@ Describe 'LocalAdmin-Hygiene (Detect & Remediate Contract, SID & Localization)' 
             [PSCustomObject]@{ Name = 'ROGUEDOM\Administrator'; Sid = 'S-1-5-21-999-888-777-1105' }
         )
 
-        $res = & $script:AdminDetect -TestMembers $members -ComputerName 'WKSTN-01' -NoExit
+        $res = & $script:AdminDetect -TestMembers $members -LocalHostName 'WKSTN-01' -NoExit
         $res.Compliant | Should -BeFalse
         $res.ExitCode | Should -Be 1
         $res.UnauthorizedMembers | Should -Be @('ROGUEDOM\LAPS_Admin', 'ROGUEDOM\Administrator')
@@ -139,7 +139,7 @@ Describe 'LocalAdmin-Hygiene (Detect & Remediate Contract, SID & Localization)' 
             [PSCustomObject]@{ Name = 'WKSTN-01\Administrator'; Sid = 'S-1-5-21-100-200-300-500' },
             [PSCustomObject]@{ Name = 'AzureAD\JohnDoe'; Sid = 'S-1-12-1-999999999-111111111-222222222-333333333' }
         )
-        $res = & $script:AdminDetect -TestMembers $members -ComputerName 'WKSTN-01' -NoExit
+        $res = & $script:AdminDetect -TestMembers $members -LocalHostName 'WKSTN-01' -NoExit
         $res.Compliant | Should -BeFalse
         $res.UnauthorizedMembers | Should -Be @('AzureAD\JohnDoe')
     }

@@ -25,7 +25,7 @@
 .PARAMETER TestMembers
     Optional array of member objects (@{ Name = '...'; Sid = '...' }) or strings for offline Pester testing.
 
-.PARAMETER ComputerName
+.PARAMETER LocalHostName
     Local machine name used to scope local accounts. Defaults to $env:COMPUTERNAME.
 
 .PARAMETER NoExit
@@ -64,7 +64,7 @@ param (
     [object[]]$TestMembers,
 
     [Parameter(Mandatory = $false)]
-    [string]$ComputerName = $env:COMPUTERNAME,
+    [string]$LocalHostName = $env:COMPUTERNAME,
 
     [Parameter(Mandatory = $false)]
     [switch]$NoExit
@@ -266,8 +266,8 @@ try {
     $normalizedMembers = ConvertTo-NormalizedAdminMember -RawMembers $rawMembers
 
     # In offline string-only test runs, infer machine prefix from the first local RID-500-like entry if ComputerName wasn't overridden
-    $effectiveComputerName = $ComputerName
-    if ($PSBoundParameters.ContainsKey('TestMembers') -and (-not $PSBoundParameters.ContainsKey('ComputerName'))) {
+    $effectiveComputerName = $LocalHostName
+    if ($PSBoundParameters.ContainsKey('TestMembers') -and (-not $PSBoundParameters.ContainsKey('LocalHostName'))) {
         foreach ($m in $normalizedMembers) {
             if ($m.Name -match '^([^\\]+)\\(Administrator|Administrador|LAPS_Admin)$' -and $Matches[1] -notmatch '^(?i)(CORP|AzureAD|CONTOSO|ROGUEDOM)$') {
                 $effectiveComputerName = $Matches[1]
