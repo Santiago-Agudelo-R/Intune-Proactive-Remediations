@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-11-21
+
+### Fixed
+- **Inventory tool:** The output no longer invents an asset tag (`AST-<serial>`) or a `Deployed` status that did not come from any system. `SnipeItAssetPayload` is renamed `HardwareInventory` and contains only facts collected from the device.
+
 ## [1.2.1] - 2026-11-21
 
 ### Security
@@ -23,9 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - 2026-11-21
 
 ### Fixed
-- **LocalAdmin-Hygiene (`Q7`, `Q8`, `S4`):** Unified `Detect-UnauthorizedLocalAdmins.ps1` and `Remediate-UnauthorizedLocalAdmins.ps1` around the same SID-first evaluation function (`Test-IsApprovedLocalAdmin`). Both scripts now evaluate `.Sid` against `$ApprovedSids` (eliminating detection/remediation loops on Entra ID role SIDs), approve built-in Local Administrator (`RID -500`) and Domain/Enterprise Admins (`RID -512` / `-519`) by SID across Spanish (`Administrador`, `Admins. del dominio`) and multilingual Windows builds, and scope local management accounts (`LAPS_Admin`) to `<ComputerName>\LAPS_Admin` to prevent cross-domain name spoofing.
-- **SystemHealth-VSS-Patching (`Q9`, `S5`):** `Remediate-SystemBackupAndPatchHealth.ps1` no longer deletes files from `C:\Windows\Temp` by default (`$PurgeTempOnLowDisk = $false`) to prevent destroying forensic staging artifacts, respects `C:\ProgramData\SecOps\IR_HOLD.lock`, and only restarts `VSS` when a VSS writer is actually in a failed state.
-- **Inventory Tool (`Q9`):** Aligned `tools/Invoke-EndpointSupportAndInventory.ps1` comment-based help with its exact implementation scope.
+- **LocalAdmin-Hygiene:** Unified `Detect-UnauthorizedLocalAdmins.ps1` and `Remediate-UnauthorizedLocalAdmins.ps1` around the same SID-first evaluation function (`Test-IsApprovedLocalAdmin`). Both scripts now evaluate `.Sid` against `$ApprovedSids` (eliminating detection/remediation loops on Entra ID role SIDs), approve built-in Local Administrator (`RID -500`) and Domain/Enterprise Admins (`RID -512` / `-519`) by SID across Spanish (`Administrador`, `Admins. del dominio`) and multilingual Windows builds, and scope local management accounts (`LAPS_Admin`) to `<ComputerName>\LAPS_Admin` to prevent cross-domain name spoofing.
+- **SystemHealth-VSS-Patching:** `Remediate-SystemBackupAndPatchHealth.ps1` no longer deletes files from `C:\Windows\Temp` by default (`$PurgeTempOnLowDisk = $false`) to prevent destroying forensic staging artifacts, respects `C:\ProgramData\SecOps\IR_HOLD.lock`, and only restarts `VSS` when a VSS writer is actually in a failed state.
+- **Inventory Tool:** Aligned `tools/Invoke-EndpointSupportAndInventory.ps1` comment-based help with its exact implementation scope.
 
 ### Added
 - **Defender-SensorHealth (`Detect-DefenderSensorHealth.ps1` / `Remediate-DefenderSensorHealth.ps1` — MITRE `T1562.001`):** Audits Microsoft Defender Antivirus (`WinDefend`) and Microsoft Defender for Endpoint sensor (`Sense`) service state, Real-Time Protection, Behavior Monitoring, Tamper Protection, and signature freshness (`MaxSignatureAgeDays = 7`).

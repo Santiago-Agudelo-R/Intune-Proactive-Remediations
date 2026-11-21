@@ -80,7 +80,7 @@ COMPLIANT: Volume C: ProtectionStatus=On, EncryptionPercentage=100%, Protector={
 
 | Script | Purpose |
 | :--- | :--- |
-| `tools/Invoke-EndpointSupportAndInventory.ps1` | Support diagnostics (uptime, WinRM/WMI service state, hung services) and a Snipe-IT-style hardware asset payload. Supports `-DemoMode`. Not a remediation pair. |
+| `tools/Invoke-EndpointSupportAndInventory.ps1` | Support diagnostics (uptime, WinRM/WMI service state, hung services) and a hardware inventory record (serial, model, memory, OS) that maps to a CMDB such as Snipe-IT. Supports `-DemoMode`. Not a remediation pair. |
 
 ---
 

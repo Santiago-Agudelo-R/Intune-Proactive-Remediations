@@ -317,11 +317,12 @@ Describe 'Invoke-EndpointSupportAndInventory' {
         $script:SupportScript = Join-Path -Path $PSScriptRoot -ChildPath '..\tools\Invoke-EndpointSupportAndInventory.ps1'
     }
 
-    It 'builds a valid Snipe-IT asset payload and passes healthy hosts in DemoMode' {
+    It 'returns only collected hardware facts and passes healthy hosts in DemoMode' {
         $res = & $script:SupportScript -DemoMode
         $res.Healthy | Should -BeTrue
         $res.ExitCode | Should -Be 0
-        $res.SnipeItAssetPayload.asset_tag | Should -Be 'AST-PF3X9821'
+        $res.HardwareInventory.serial | Should -Be 'PF3X9821'
+        $res.HardwareInventory.PSObject.Properties.Name | Should -Not -Contain 'asset_tag'
     }
 
     It 'flags excessive uptime, stopped WinRM, and hung services for L2/L3 remediation' {

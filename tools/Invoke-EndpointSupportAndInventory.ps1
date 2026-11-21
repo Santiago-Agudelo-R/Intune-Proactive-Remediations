@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    PowerShell Endpoint Support Diagnostics & Hardware Asset Inventory (Snipe-IT / CMDB) Collector.
+    PowerShell endpoint support diagnostics and hardware inventory collector.
 
 .DESCRIPTION
     Combines endpoint support diagnostics with hardware asset inventory telemetry:
-    1. Hardware & BIOS Inventory (Snipe-IT / CMDB Schema): Extracts SerialNumber, Manufacturer, Model,
-       TotalPhysicalMemoryGB, OS Build, and UptimeDays.
+    1. Hardware inventory: serial number, manufacturer, model, memory and OS version, in field names that
+       map to a CMDB such as Snipe-IT. Asset tags and lifecycle status are left to the CMDB.
     2. Service & Uptime Diagnostics: Detects services stuck in 'Stop Pending' or 'Start Pending', verifies
        that the WinRM and WMI (Winmgmt) services are running, and flags excessive uptime (>14 days).
     Supports -DemoMode for offline testing and Pester CI pipelines.
@@ -60,22 +60,22 @@ function Get-EndpointSupportDiagnostic {
         $supportFindings.Add("HungServicesDetected($($AssetTelemetry.HungServices -join ','))")
     }
 
-    $snipeItPayload = [PSCustomObject]@{
-        asset_tag      = "AST-$($AssetTelemetry.SerialNumber)"
-        serial         = $AssetTelemetry.SerialNumber
-        model_name     = $AssetTelemetry.Model
-        manufacturer   = $AssetTelemetry.Manufacturer
-        hostname       = $AssetTelemetry.ComputerName
-        os_version     = $AssetTelemetry.OsVersion
-        ram_gb         = $AssetTelemetry.MemoryGB
-        status_label   = "Deployed"
+    # Only facts collected from the device. Asset tags and lifecycle status belong to the CMDB
+    # (for example Snipe-IT) and are not invented here.
+    $hardwareInventory = [PSCustomObject]@{
+        serial       = $AssetTelemetry.SerialNumber
+        manufacturer = $AssetTelemetry.Manufacturer
+        model_name   = $AssetTelemetry.Model
+        hostname     = $AssetTelemetry.ComputerName
+        os_version   = $AssetTelemetry.OsVersion
+        ram_gb       = $AssetTelemetry.MemoryGB
     }
 
     return [PSCustomObject]@{
         Healthy              = ($supportFindings.Count -eq 0)
         ExitCode             = if ($supportFindings.Count -eq 0) { 0 } else { 1 }
         SupportFindings      = $supportFindings.ToArray()
-        SnipeItAssetPayload  = $snipeItPayload
+        HardwareInventory    = $hardwareInventory
         SummaryMessage       = if ($supportFindings.Count -eq 0) {
             "HEALTHY: Host $($AssetTelemetry.ComputerName) (SN: $($AssetTelemetry.SerialNumber), Uptime: $($AssetTelemetry.UptimeDays)d) passed support checks."
         }
